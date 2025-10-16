@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QR Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { margin:0; font-family: system-ui, sans-serif; }
+    #wrap { display:flex; flex-direction:column; align-items:center; gap:8px; padding:8px; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid #ccc; cursor:pointer; }
+    #reader { width:100%; max-width:520px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="reader"></div>
+    <div id="status">Idle</div>
+    <button id="startBtn">Start camera</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </div>
+
+  <script>
+    let html5QrCode;
+    let lastSent = "";
+    let lastAt = 0;
+
+    const sendToParent = (text) => {
+      // Avoid spamming duplicates in quick succession
+      const now = Date.now();
+      if (text === lastSent && (now - lastAt) < 1000) return;
+      lastSent = text; lastAt = now;
+
+      // Post to parent FlutterFlow app (use a specific origin if you want to lock this down)
+      window.parent.postMessage({ type: "qr", text }, "*");
+      document.getElementById("status").textContent = "Scanned: " + text;
+    };
+
+    async function start() {
+      document.getElementById("status").textContent = "Starting camera...";
+      html5QrCode = new Html5Qrcode("reader");
+      try {
+        // Prefer back camera if available
+        const devices = await Html5Qrcode.getCameras();
+        const back = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[0];
+        await html5QrCode.start(
+          back.id,
+          { fps: 15, qrbox: { width: 260, height: 260 } },
+          (decodedText) => sendToParent(decodedText),
+          // ignore scan errors (they happen frequently while scanning)
+          () => {}
+        );
+        document.getElementById("status").textContent = "Scanning…";
+        document.getElementById("startBtn").disabled = true;
+        document.getElementById("stopBtn").disabled = false;
+      } catch (e) {
+        document.getElementById("status").textContent = "Camera error: " + e;
+      }
+    }
+
+    async function stop() {
+      if (html5QrCode) {
+        await html5QrCode.stop();
+        await html5QrCode.clear();
+        html5QrCode = null;
+      }
+      document.getElementById("status").textContent = "Stopped";
+      document.getElementById("startBtn").disabled = false;
+      document.getElementById("stopBtn").disabled = true;
+    }
+
+    document.getElementById("startBtn").addEventListener("click", start);
+    document.getElementById("stopBtn").addEventListener("click", stop);
+
+    // Optional: allow parent to stop/start by message
+    window.addEventListener("message", (e) => {
+      if (!e.data || typeof e.data !== "object") return;
+      if (e.data.cmd === "stop") stop();
+      if (e.data.cmd === "start") start();
+    });
+  </script>
+</body>
+</html>
